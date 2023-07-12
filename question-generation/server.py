@@ -27,9 +27,9 @@ class ReflectionRequestPayload(BaseModel):
 
 
 class ReflectionResponseItem(BaseModel):
-    text_in_HTML_format: str
-    sentence_number_in_paragraph: int
-    quality: float
+    response_text: str
+    relevant_to_sentence_number: int
+    response_quality: float
 
 class ReflectionResponses(BaseModel):
     reflections: List[ReflectionResponseItem]
@@ -89,9 +89,9 @@ async def get_reflections_chat(
     # TODO: improve the "quality" mechanism
     desired_schema_prompt = '''
 interface Response {
-    text_in_HTML_format: string;
-    sentence_number_in_paragraph: number;
-    quality: float between 0 and 1
+    response_text: str
+    relevant_to_sentence_number: int
+    response_quality: float
 }
 
 interface Responses {
@@ -99,23 +99,17 @@ interface Responses {
 }
 '''
 
-    prompt = """
-You will write Responses to the following prompt. JSON schema:
+    prompt = sanitize(request.prompt)
 
-""" + desired_schema_prompt + """
-
-Prompt:
-
-> """ + request.prompt
-    
+    initial_messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": sanitize(request.paragraph)},
+    ]
 
     response = await async_chat_with_backoff(
         model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": sanitize(request.paragraph)},
-        ],
-        temperature=1,
+        messages=initial_messages,
+        temperature=.7,
         max_tokens=1024,
         top_p=1,
         frequency_penalty=0,
@@ -124,46 +118,41 @@ Prompt:
 
     # Extract the response
     response_text = response["choices"][0]["message"]["content"]
+    print(response_text)
+
+    conversion_messages = initial_messages + [
+        {"role": "assistant", "content": response_text},
+        {"role": "system", "content": "Convert the response into JSON format. Use the following schema:\n\n" + desired_schema_prompt},
+    ]
+
+    # Ask the LM to convert it to JSON
+    conversion_response = await openai.ChatCompletion.acreate(
+        model="gpt-3.5-turbo",
+        messages=conversion_messages,
+        temperature=.3,
+        max_tokens=1024,
+    )
+
+    conversion_response_text = conversion_response["choices"][0]["message"]["content"]
 
     # Attempt to parse JSON
     try:
-        print(response_text)
-        response_json = json.loads(response_text)
+        print(conversion_response_text)
+        response_json = json.loads(conversion_response_text)
         reflection_items = ReflectionResponses(**response_json)
     except Exception as e1:
-        # Ask the LM to fix the JSON.
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "The JSON should be an array of items with the following schema:\n\n" + desired_schema_prompt},
-                {"role": "user", "content": response_text},
-            ],
-            temperature=.5,
-            max_tokens=1024,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0,
-        )
-
-        new_response = response["choices"][0]["message"]["content"]
-
-        # Try to parse again
-        try:
-            response_json = json.loads(new_response)
-            reflection_items = ReflectionResponses(**response_json)
-        except Exception as e2:
-            # If it still doesn't work, log the error and fail out
-            with sqlite3.connect(db_file) as conn:
-                c = conn.cursor()
-                # Use SQL timestamp
-                c.execute(
-                    'INSERT INTO requests VALUES (datetime("now"), ?, ?, ?, ?)',
-                    (request.prompt, request.paragraph, json.dumps(dict(
-                        error=str(e2), 
-                        response=response_text
-                    )), "false"),
-                )
-            raise e2
+        # If it still doesn't work, log the error and fail out
+        with sqlite3.connect(db_file) as conn:
+            c = conn.cursor()
+            # Use SQL timestamp
+            c.execute(
+                'INSERT INTO requests VALUES (datetime("now"), ?, ?, ?, ?)',
+                (request.prompt, request.paragraph, json.dumps(dict(
+                    error=str(e1), 
+                    response=response_text
+                )), "false"),
+            )
+        raise e1
 
     # Cache the response
     with sqlite3.connect(db_file) as conn:

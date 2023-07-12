@@ -204,7 +204,7 @@ async function main() {
       // Create a card for each reflection returned
       for (let j = 0; j < reflections.length; j++) {
         const reflection = reflections[j];
-        const card = createCard(i, reflection.text_in_HTML_format);
+        const card = createCard(i, reflection.response_text);
         cardsFragment.appendChild(card);
       }
     }
