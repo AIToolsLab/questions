@@ -42,6 +42,54 @@ export default function App({ isOfficeInitialized }: AppProps) {
     const [cards, updateCards] = React.useState<Card[]>([]);
     const [prompt, updatePrompt] = React.useState('');
     const [loading, updateLoading] = React.useState(false);
+    const [dict] = React.useState({});
+
+    // Get the current paragraph that the cursor is in
+    // Pick the first paragraph if current selection includes multiple paragraphs
+    async function getCurrentParagraph(context) {
+        let selectedParagraph = context.document.getSelection().paragraphs;
+        context.load(selectedParagraph);
+        await context.sync();
+
+        return selectedParagraph.items[0];
+    }
+
+    // Get the paragraph index by comparing the texts of the paragraphs
+    // Assume that there are no paragraphs that have exactly the same text
+    function getParagraphIndex(paragraph) {
+        return Object.keys(dict).find(key => dict[key].text === paragraph.text) || null;
+    }
+
+    // Change the background color of card that has the given cardId
+    function changeCardHighlightColor(cardId) {
+        const allCards = cards.getElementsByClassName("card");
+
+        allCards.forEach(card => {
+            card.style.backgroundColor = card.paragraph === cardId ? "#FFFF00" : "#F0F0F0";     // yellow or grey
+        });
+    }
+
+    // Detect the cursor location and change the card color as cursor moves
+    async function detectParagraphChange(context) {
+        let initialParagraph = await getCurrentParagraph(context);
+        let initialIndex = getParagraphIndex(initialParagraph);
+        changeCardHighlightColor(initialIndex);
+
+        while (true) {
+            let currentParagraph = await getCurrentParagraph(context);
+            if (initialParagraph.text != currentParagraph.text) {
+                let currentIndex = getParagraphIndex(currentParagraph);
+                changeCardHighlightColor(currentIndex);
+                initialParagraph = currentParagraph;
+            }
+            // Add a delay between checks (e.g., 1 second) to avoid excessive API calls
+            await delay(1000);
+        }
+    }
+
+    function delay(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
 
     // Change the highlight color of the selected paragraph
     async function changeParagraphHighlightColor(paragraphId, operation) {
@@ -114,6 +162,9 @@ export default function App({ isOfficeInitialized }: AppProps) {
             for (let i = 0; i < paragraphs.items.length; i++) {
                 const reflections = allReflections[i];
 
+                // Match the index with the paragraph using a dictionary
+                dict[i] = paragraphs.items[i];
+
                 // Create a card for each reflection returned
                 for (let j = 0; j < reflections.length; j++) {
                     const reflection = reflections[j];
@@ -127,6 +178,9 @@ export default function App({ isOfficeInitialized }: AppProps) {
             }
 
             updateCards(curCards);
+
+            // Keep detecting the change on paragraph after cards are created
+            detectParagraphChange(context);
         });
     }
 
