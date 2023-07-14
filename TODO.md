@@ -1,5 +1,7 @@
 # Issues
 
+- Need Error handling 
+
 ## Prompts need improvement
 
 1. Fix ChatGPT prompt so that it is confined to text only provided by the user

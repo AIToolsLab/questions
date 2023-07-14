@@ -31,6 +31,7 @@ class ReflectionResponseItem(BaseModel):
     sentence_number_in_paragraph: int
     quality: float
 
+
 class ReflectionResponses(BaseModel):
     reflections: List[ReflectionResponseItem]
 
@@ -57,13 +58,28 @@ with sqlite3.connect(db_file) as conn:
         "CREATE TABLE IF NOT EXISTS requests (timestamp, prompt, paragraph, response, success)"
     )
 
+
 def sanitize(text):
     return text.replace('"', '').replace("'", "")
 
+
 async_chat_with_backoff = (
-    retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+    retry(wait=wait_random_exponential(
+        min=1, max=60), stop=stop_after_attempt(6))
     (openai.ChatCompletion.acreate)
 )
+
+
+def sanitize(text):
+    return text.replace('"', '').replace("'", "")
+
+
+async_chat_with_backoff = (
+    retry(wait=wait_random_exponential(
+        min=1, max=60), stop=stop_after_attempt(6))
+    (openai.ChatCompletion.acreate)
+)
+
 
 async def get_reflections_chat(
     request: ReflectionRequestPayload,
@@ -107,7 +123,6 @@ You will write Responses to the following prompt. JSON schema:
 Prompt:
 
 > """ + request.prompt
-    
 
     response = await async_chat_with_backoff(
         model="gpt-3.5-turbo",
@@ -159,7 +174,7 @@ Prompt:
                 c.execute(
                     'INSERT INTO requests VALUES (datetime("now"), ?, ?, ?, ?)',
                     (request.prompt, request.paragraph, json.dumps(dict(
-                        error=str(e2), 
+                        error=str(e2),
                         response=response_text
                     )), "false"),
                 )
@@ -171,7 +186,8 @@ Prompt:
         # Use SQL timestamp
         c.execute(
             'INSERT INTO requests VALUES (datetime("now"), ?, ?, ?, ?)',
-            (request.prompt, request.paragraph, json.dumps(reflection_items.dict()), "true"),
+            (request.prompt, request.paragraph, json.dumps(
+                reflection_items.dict()), "true"),
         )
 
     return reflection_items
